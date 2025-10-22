@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading Company Data...</title>
+    <!-- Tailwind CSS CDN for modern, clean design -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        /* Custom styles for better visual appeal and overrides */
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+            background-color: #f8faff; /* Light blue-gray background */
+            color: #2d3748; /* Dark text */
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 900px;
+        }
+        .card {
+            background-color: #ffffff;
+            border-radius: 0.75rem; /* rounded-xl */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); /* shadow-xl */
+            padding: 2rem;
+            transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+            border: 1px solid #e2e8f0; /* light gray border */
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+        }
+        .value-label {
+            font-size: 0.875rem; /* text-sm */
+            color: #718096; /* gray-600 */
+            text-transform: uppercase;
+            letter-spacing: 0.075em; /* tracking-widest */
+            font-weight: 600; /* font-semibold */
+        }
+        .value-data {
+            font-size: 2.5rem; /* text-4xl */
+            font-weight: 800; /* font-extrabold */
+            color: #1a202c; /* gray-900 */
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .fy-data {
+            font-size: 1.125rem; /* text-lg */
+            color: #4a5568; /* gray-700 */
+            font-weight: 500; /* font-medium */
+        }
+        .error-message {
+            color: #e53e3e; /* red-600 */
+            font-weight: 700; /* font-bold */
+        }
+        /* Pulse animation for loading state */
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center py-10 px-4">
+    <main class="container mx-auto" aria-live="polite">
+        <section class="text-center mb-10">
+            <h1 id="share-entity-name" class="text-6xl md:text-7xl font-extrabold text-gray-900 mb-4 animate-pulse">Loading...</h1>
+            <p class="text-xl md:text-2xl text-gray-700">Entity Common Stock Shares Outstanding</p>
+        </section>
+
+        <section id="data-display" class="grid md:grid-cols-2 gap-8 mb-10">
+            <!-- Max Value Card -->
+            <div class="card flex flex-col items-center justify-center p-8">
+                <p class="value-label">Maximum Shares Outstanding</p>
+                <p id="share-max-value" class="value-data text-blue-600">...</p>
+                <p class="fy-data">Fiscal Year: <span id="share-max-fy">...</span></p>
+            </div>
+
+            <!-- Min Value Card -->
+            <div class="card flex flex-col items-center justify-center p-8">
+                <p class="value-label">Minimum Shares Outstanding</p>
+                <p id="share-min-value" class="value-data text-green-600">...</p>
+                <p class="fy-data">Fiscal Year: <span id="share-min-fy">...</span></p>
+            </div>
+        </section>
+
+        <section id="error-section" class="text-center bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative hidden" role="alert">
+            <p class="error-message text-xl">An error occurred while loading data.</p>
+            <p class="text-sm mt-2" id="error-details"></p>
+        </section>
+
+        <footer class="text-center text-gray-500 text-sm mt-12">
+            <p>Data provided by the U.S. Securities and Exchange Commission.</p>
+            <p class="mt-1 text-xs">Note: The initial `data.json` file (default view for Carnival) is pre-generated (server-side) using a descriptive User-Agent as per SEC guidance. Browser-based fetches (e.g., when a `?CIK=` parameter is used) are performed via a CORS proxy, and use the browser's default User-Agent.</p>
+            <p class="mt-1 text-xs">For CIKs not found, or without relevant data for years after 2020, an error message will be displayed.</p>
+        </footer>
+    </main>
+
+    <script>
+        // Function to format numbers with commas for better readability
+        function formatNumber(num) {
+            return num.toLocaleString('en-US'); 
+        }
+
+        /**
+         * Fetches and renders company share data based on CIK.
+         * If no CIK is provided or invalid, it defaults to loading 'data.json'.
+         * If a valid CIK is provided, it fetches from the SEC API via a CORS proxy.
+         * @param {string|null} cik - The 10-digit CIK of the company to fetch, or null for default.
+         */
+        async function fetchAndRenderData(cik = null) {
+            const defaultCik = '0000815097'; // Carnival's CIK
+            const secApiEndpoint = (targetCik) => `https://data.sec.gov/api/xbrl/companyconcept/CIK${targetCik}/dei/EntityCommonStockSharesOutstanding.json`;
+            const proxyUrl = (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`; // Using corsproxy.io as a CORS bypass
+
+            let fetchSource;
+            let isSecApiCall = false;
+
+            // Determine fetch source: local data.json or SEC API via proxy
+            if (cik && /^\d{10}$/.test(cik)) {
+                fetchSource = proxyUrl(secApiEndpoint(cik));
+                isSecApiCall = true;
+            } else {
+                fetchSource = 'data.json'; // Default path to load pre-generated local data.json for Carnival
+            }
+
+            // Reset UI for loading state
+            document.getElementById('share-entity-name').classList.add('animate-pulse');
+            document.getElementById('share-entity-name').textContent = 'Loading...';
+            document.title = 'Loading Company Data...';
+            document.getElementById('share-max-value').textContent = '...';
+            document.getElementById('share-max-fy').textContent = '...';
+            document.getElementById('share-min-value').textContent = '...';
+            document.getElementById('share-min-fy').textContent = '...';
+            document.getElementById('data-display').classList.remove('hidden'); // Ensure data display is visible
+            document.getElementById('error-section').classList.add('hidden'); // Hide error message
+            document.getElementById('error-details').textContent = ''; // Clear previous error details
+
+            try {
+                const response = await fetch(fetchSource);
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status} - ${response.statusText || 'Unknown error'}.`);
+                }
+
+                const rawData = await response.json();
+
+                let processedData = {};
+                if (isSecApiCall) {
+                    // Process data fetched directly from SEC API
+                    const entityName = rawData.entityName || "Unknown Company";
+                    const shares = rawData.units && rawData.units.shares ? rawData.units.shares : [];
+
+                    const filteredShares = shares.filter(s =>
+                        parseInt(s.fy) > 2020 && typeof s.val === 'number'
+                    );
+
+                    if (filteredShares.length === 0) {
+                        throw new Error(`No common stock shares data found for years after 2020 for CIK ${cik}.`);
+                    }
+
+                    // Sort by value to easily find max and min
+                    filteredShares.sort((a, b) => a.val - b.val);
+
+                    const minShare = filteredShares[0];
+                    const maxShare = filteredShares[filteredShares.length - 1];
+
+                    processedData = {
+                        entityName: entityName,
+                        max: { val: maxShare.val, fy: String(maxShare.fy) },
+                        min: { val: minShare.val, fy: String(minShare.fy) }
+                    };
+                } else {
+                    // Assume data from local data.json is already in the correct processedData format
+                    processedData = rawData;
+                    // Basic validation for data.json structure
+                    if (!processedData.entityName || !processedData.max || !processedData.min ||
+                        typeof processedData.max.val !== 'number' || typeof processedData.max.fy !== 'string' ||
+                        typeof processedData.min.val !== 'number' || typeof processedData.min.fy !== 'string') {
+                        throw new Error("Invalid structure for data.json. Missing or incorrect fields.");
+                    }
+                }
+
+                // Update DOM with processed data
+                document.title = `${processedData.entityName} Shares Data`;
+                document.getElementById('share-entity-name').textContent = processedData.entityName;
+                document.getElementById('share-max-value').textContent = formatNumber(processedData.max.val);
+                document.getElementById('share-max-fy').textContent = processedData.max.fy;
+                document.getElementById('share-min-value').textContent = formatNumber(processedData.min.val);
+                document.getElementById('share-min-fy').textContent = processedData.min.fy;
+
+            } catch (error) {
+                console.error("Error fetching or processing data:", error);
+                document.title = "Error Loading Data";
+                document.getElementById('share-entity-name').textContent = 'Data Load Error';
+                document.getElementById('data-display').classList.add('hidden'); // Hide data cards
+                document.getElementById('error-section').classList.remove('hidden'); // Show error message
+                document.getElementById('error-details').textContent = error.message; // Display specific error details
+            } finally {
+                document.getElementById('share-entity-name').classList.remove('animate-pulse'); // Stop pulse animation
+            }
+        }
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const cikParam = urlParams.get('CIK');
+            fetchAndRenderData(cikParam); // Call with CIK from URL or null for default
+        });
+    </script>
+</body>
+</html>
